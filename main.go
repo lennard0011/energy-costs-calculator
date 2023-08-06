@@ -148,10 +148,11 @@ func readCSVtoMeteringData(csvFilePath string, timezoneName string) (map[string]
 	// Process each record
 	var currentId string
 	var currentMeteringData MeteringData
-	for _, record := range records {
+	// Start from the second row as the first are the rows
+	for _, record := range records[1:] {
 		id := record[0]
-		timerecord := record[1]
-		value := record[2]
+		value := record[1]
+		timerecord := record[2]
 
 		if currentId != id {
 			meteringDatas[currentId] = currentMeteringData
@@ -207,6 +208,8 @@ func main() {
 		// Calculate the costs of the energy used
 		energyCosts[id] = meteringData.calculateCost()
 	}
+
+	fmt.Println(energyCosts)
 
 	csvFile, err := os.Create("costs.csv")
 	if err != nil {
