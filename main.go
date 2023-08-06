@@ -18,8 +18,8 @@ const usageUpperBound float64 = 100
 
 type MeteringDataEntry struct {
 	Time    time.Time
-	Value   float64
-	Missing bool // when constructing and not providing the Missing, it defaults to false.
+	Value   float64 //  The measured energy reading in Wh
+	Missing bool    // when constructing and not providing the Missing, it defaults to false.
 }
 
 type MeteringData struct {
@@ -93,7 +93,7 @@ func (myMeterinData MeteringData) imputeMissingValues() {
 }
 
 func (myMeterinData MeteringData) calculateCost() int {
-	return 0
+	return 1
 }
 
 func findCSVInFolder() string {
@@ -155,8 +155,11 @@ func readCSVtoMeteringData(csvFilePath string, timezoneName string) (map[string]
 		timerecord := record[2]
 
 		if currentId != id {
-			meteringDatas[currentId] = currentMeteringData
+			if currentId != "" {
+				meteringDatas[currentId] = currentMeteringData
+			}
 			currentMeteringData = MeteringData{}
+			currentMeteringData.ID = id
 			currentId = id
 		}
 
@@ -180,6 +183,8 @@ func readCSVtoMeteringData(csvFilePath string, timezoneName string) (map[string]
 		}
 		currentMeteringData.addEntry(entry)
 	}
+
+	meteringDatas[currentId] = currentMeteringData
 
 	// Now we have the meteringDatas in a map where the id's are a key
 	return meteringDatas, nil
