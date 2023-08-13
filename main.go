@@ -12,6 +12,7 @@ import (
 )
 
 const inputfoldername string = "input-data"
+const pricingRatesFileName string = "pricing.csv"
 const missingDataFiller string = "missing value"
 const usageLowerBound float64 = 0
 const usageUpperBound float64 = 100
@@ -22,17 +23,24 @@ type MeteringDataEntry struct {
 	Missing bool    // when constructing and not providing the Missing, it defaults to false.
 }
 
+func (myMeterinDataEntry MeteringDataEntry) Weekday() time.Weekday {
+	return myMeterinDataEntry.Time.Weekday()
+}
+
+func (myMeterinDataEntry MeteringDataEntry) MinutesSinceMidnight() int {
+	return myMeterinDataEntry.Time.Hour()*60 + myMeterinDataEntry.Time.Minute()
+}
+
 type MeteringData struct {
 	ID   string
 	Data []MeteringDataEntry
 }
 
-func (myMeterinData MeteringData) addEntry(entry MeteringDataEntry) MeteringDataEntry {
+func (myMeterinData *MeteringData) addEntry(entry MeteringDataEntry) {
 	myMeterinData.Data = append(myMeterinData.Data, entry)
-	return entry
 }
 
-func (myMeterinData MeteringData) flagFaultyValues() {
+func (myMeterinData *MeteringData) flagFaultyValues() {
 	// Flag the entries that do not follow the sanity checks
 	if len(myMeterinData.Data) < 2 {
 		// Can only check the usage if there are at least 2 elements.
@@ -54,12 +62,12 @@ func usagePassSanityCheck(usage float64) bool {
 	return usage < usageLowerBound || usage > usageUpperBound
 }
 
-func (myMeterinData MeteringData) linearlyImputeInterval(start, end int) {
+func (myMeterinData *MeteringData) linearlyImputeInterval(start, end int) {
 	// Linearly impute the values in the interval with the value before and after the interval.
 
 	// Check if start and end are valid indices within the data slice
 	if start < 0 || end >= len(myMeterinData.Data) || start >= end {
-		fmt.Println("Invalid start or end index.")
+		log.Println("Invalid start or end index.")
 		return
 	}
 
@@ -69,10 +77,9 @@ func (myMeterinData MeteringData) linearlyImputeInterval(start, end int) {
 	for i := start; i <= end; i++ {
 		myMeterinData.Data[i].Value = myMeterinData.Data[start-1].Value + float64(i-start+1)*delta
 	}
-
 }
 
-func (myMeterinData MeteringData) imputeMissingValues() {
+func (myMeterinData *MeteringData) imputeMissingValues() {
 	// Impute the entries in the data which have the missingDataFiller
 	inMissingInterval := false
 	missingIntervalIndexStart := -1
@@ -92,8 +99,90 @@ func (myMeterinData MeteringData) imputeMissingValues() {
 	}
 }
 
-func (myMeterinData MeteringData) calculateCost() int {
-	return 1
+type WeekdayPriceRate struct {
+	Weekday     string
+	MinutesFrom int
+	MinutesTo   int
+	Price       float64 //Price per used Wh
+}
+
+type WeekdayPriceRateOverview struct {
+	Rates []WeekdayPriceRate
+}
+
+func (myweekdayPriceRateOverview *WeekdayPriceRateOverview) addPriceRate(newWeekdayPriceRate WeekdayPriceRate) {
+	myweekdayPriceRateOverview.Rates = append(myweekdayPriceRateOverview.Rates, newWeekdayPriceRate)
+}
+
+func importPricingRates() (WeekdayPriceRateOverview, error) {
+	pricingRates := WeekdayPriceRateOverview{}
+
+	// Open the CSV file
+	file, err := os.Open(pricingRatesFileName)
+	if err != nil {
+		return pricingRates, err
+	}
+	defer file.Close()
+
+	// Create a new CSV reader
+	reader := csv.NewReader(file)
+
+	// Read all the records
+	records, err := reader.ReadAll()
+	if err != nil {
+		return pricingRates, err
+	}
+
+	for _, record := range records[1:] {
+		weekday := record[0]
+		minutesFrom, _ := strconv.Atoi(record[1])
+		minutesTo, _ := strconv.Atoi(record[2])
+		price, _ := strconv.ParseFloat(record[3], 64)
+
+		// Create a new weekdayPriceRate struct and append it to the slice
+		weekdayPriceRate := WeekdayPriceRate{
+			Weekday:     weekday,
+			MinutesFrom: minutesFrom,
+			MinutesTo:   minutesTo,
+			Price:       price,
+		}
+		pricingRates.addPriceRate(weekdayPriceRate)
+	}
+
+	return pricingRates, nil
+}
+
+func (meteringData MeteringData) calculateCost(weekdayPriceRates WeekdayPriceRateOverview) float64 {
+	// find rate that corresponds to meteringdata, then apply calculation.
+	// Cant calculate the cost of the first entry as the usage cannot be calculated.
+	var totalCosts float64 = 0
+
+	// Need at least two datapoints to calculate usage and costs
+	if len(meteringData.Data) < 2 {
+		return totalCosts
+	}
+
+	for meteringDataEntryIndex, _ := range meteringData.Data[1:] {
+		currentMeteringDataEntry := meteringData.Data[meteringDataEntryIndex+1]
+		previousMeteringDataEntry := meteringData.Data[meteringDataEntryIndex]
+
+		price := weekdayPriceRates.findPrice(currentMeteringDataEntry.Weekday().String(), currentMeteringDataEntry.MinutesSinceMidnight())
+		usage := currentMeteringDataEntry.Value - previousMeteringDataEntry.Value
+		cost := price * usage
+		totalCosts += cost
+	}
+	return totalCosts
+}
+
+func (weekdayPriceRates WeekdayPriceRateOverview) findPrice(weekday string, minutesFromMidnight int) float64 {
+	var rate float64 = 0
+	for _, weekdayPriceRate := range weekdayPriceRates.Rates {
+		if weekday == weekdayPriceRate.Weekday && weekdayPriceRate.MinutesFrom <= minutesFromMidnight && minutesFromMidnight <= weekdayPriceRate.MinutesTo {
+			rate = weekdayPriceRate.Price
+		}
+	}
+	fmt.Println("rate in function: ", rate)
+	return rate
 }
 
 func findCSVInFolder() string {
@@ -135,10 +224,12 @@ func readCSVtoMeteringData(csvFilePath string, timezoneName string) (map[string]
 	reader := csv.NewReader(file)
 
 	// Read all the records
-	records, err := reader.ReadAll()
+	dataRows, err := reader.ReadAll()
 	if err != nil {
 		return meteringDatas, err
 	}
+	// First row consists of the headers of the CSV
+	records := dataRows[1:]
 
 	loc, err := time.LoadLocation(timezoneName)
 	if err != nil {
@@ -148,8 +239,8 @@ func readCSVtoMeteringData(csvFilePath string, timezoneName string) (map[string]
 	// Process each record
 	var currentId string
 	var currentMeteringData MeteringData
-	// Start from the second row as the first are the rows
-	for _, record := range records[1:] {
+	// Start from the second row as the first are the headers of the CSV
+	for _, record := range records {
 		id := record[0]
 		value := record[1]
 		timerecord := record[2]
@@ -194,16 +285,22 @@ func main() {
 	// In a specific folder take the first CSV you find
 	csvFilePath := findCSVInFolder()
 	if csvFilePath == "" {
-		fmt.Println("No CSV file found in input folder.")
+		log.Println("No CSV file for reading metering found in input folder.")
 		return
 	}
-	fmt.Println(csvFilePath)
 
 	// Per Metering ID, Transform the CSV to a map of MeteringData
-	meterinDataMap, _ := readCSVtoMeteringData(csvFilePath, "Europe/Amsterdam")
-	fmt.Println(meterinDataMap)
+	meterinDataMap, err := readCSVtoMeteringData(csvFilePath, "Europe/Amsterdam")
+	if err != nil {
+		log.Fatalf("Failed reading metering data: %s", err)
+	}
 
-	energyCosts := make(map[string]int)
+	energyCosts := make(map[string]float64)
+
+	energyPriceRates, err := importPricingRates()
+	if err != nil {
+		log.Fatalf("Failed reading price data: %s", err)
+	}
 
 	for id, meteringData := range meterinDataMap {
 		// Filter out faulty readings
@@ -211,10 +308,8 @@ func main() {
 		// Impute the missing readings
 		meteringData.imputeMissingValues()
 		// Calculate the costs of the energy used
-		energyCosts[id] = meteringData.calculateCost()
+		energyCosts[id] = meteringData.calculateCost(energyPriceRates)
 	}
-
-	fmt.Println(energyCosts)
 
 	csvFile, err := os.Create("costs.csv")
 	if err != nil {
@@ -224,7 +319,7 @@ func main() {
 	headers := []string{"id", "cost"}
 	_ = csvwriter.Write(headers)
 	for id, cost := range energyCosts {
-		_ = csvwriter.Write([]string{id, strconv.Itoa(cost)})
+		_ = csvwriter.Write([]string{id, strconv.FormatFloat(cost, 'f', -1, 64)})
 	}
 	csvwriter.Flush()
 
