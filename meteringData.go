@@ -17,11 +17,12 @@ func (myMeterinData *MeteringData) flagFaultyValues() {
 		// Can only check the usage if there are at least 2 elements.
 		return
 	}
+	// It is assumed that the first entry is correct.
 	previousValue := myMeterinData.Data[0].Value
 	for _, meteringDataEntry := range myMeterinData.Data[1:] {
 		currentValue := meteringDataEntry.Value
 		currentUsage := currentValue - previousValue
-		if usagePassSanityCheck(currentUsage) {
+		if !usageIsWithinBounds(currentUsage) {
 			meteringDataEntry.Missing = true
 		}
 		previousValue = currentValue
@@ -38,6 +39,23 @@ func (myMeterinData *MeteringData) linearlyImputeInterval(start, end int) {
 	}
 
 	delta := (myMeterinData.Data[end+1].Value - myMeterinData.Data[start-1].Value) / float64(end-start+2)
+
+	// Apply the linear imputation to each index within the interval
+	for i := start; i <= end; i++ {
+		myMeterinData.Data[i].Value = myMeterinData.Data[start-1].Value + float64(i-start+1)*delta
+	}
+}
+
+func (myMeterinData *MeteringData) linearlyForwardImputeInterval(start, end int) {
+	// Linearly impute the values in the interval with the value before and after the interval.
+
+	// Check if start and end are valid indices within the data slice
+	if start < 0 || end >= len(myMeterinData.Data) || start >= end {
+		log.Println("Invalid start or end index.")
+		return
+	}
+
+	delta := (myMeterinData.Data[start-1].Value - myMeterinData.Data[start-2].Value)
 
 	// Apply the linear imputation to each index within the interval
 	for i := start; i <= end; i++ {
@@ -62,6 +80,10 @@ func (myMeterinData *MeteringData) imputeMissingValues() {
 				myMeterinData.linearlyImputeInterval(missingIntervalIndexStart, index-1)
 			}
 		}
+	}
+	if inMissingInterval {
+		// if end of readings are missing, then inpute last readings linearly from the two readings before.
+		myMeterinData.linearlyForwardImputeInterval(missingIntervalIndexStart, len(myMeterinData.Data)-1)
 	}
 }
 

@@ -17,9 +17,9 @@ const missingDataFiller string = "missing value"
 const usageLowerBound float64 = 0
 const usageUpperBound float64 = 100
 
-func usagePassSanityCheck(usage float64) bool {
+func usageIsWithinBounds(usage float64) bool {
 	// Sanity checks a usage. It checks if the usage between not be less then 0 and more than 100
-	return usage < usageLowerBound || usage > usageUpperBound
+	return usage >= usageLowerBound && usage <= usageUpperBound
 }
 
 func importPricingRates() (WeekdayPriceRateOverview, error) {
