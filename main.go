@@ -14,6 +14,7 @@ import (
 const inputfoldername string = "input-data"
 const pricingRatesFileName string = "pricing.csv"
 const missingDataFiller string = "missing value"
+const timezoneLocation string = "Europe/Amsterdam"
 const usageLowerBound float64 = 0
 const usageUpperBound float64 = 100
 
@@ -165,7 +166,7 @@ func main() {
 	}
 
 	// Per Metering ID, Transform the CSV to a map of MeteringData
-	meterinDataMap, err := readCSVtoMeteringData(csvFilePath, "Europe/Amsterdam")
+	meterinDataMap, err := readCSVtoMeteringData(csvFilePath, timezoneLocation)
 	if err != nil {
 		log.Fatalf("Failed reading metering data: %s", err)
 	}
